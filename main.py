@@ -6,7 +6,7 @@
 import os
 import argparse
 import tensorflow as tf
-from cnn import QaCNN
+from lstm import QaLSTM
 from data_helper import DataHelper
 from data_helper import get_final_rank
 from eval import eval_map_mrr
@@ -24,18 +24,17 @@ def prepare_helper():
     data_helper.save('data/model/data_helper_info.bin')
 
 
-def train_cnn():
+def train_lstm():
     data_helper = DataHelper()
     data_helper.restore('data/model/data_helper_info.bin')
     data_helper.prepare_train_triplets('data/lemmatized/WikiQA-train-triplets.tsv')
     data_helper.prepare_dev_data('data/lemmatized/WikiQA-dev.tsv')
     data_helper.prepare_test_data('data/lemmatized/WikiQA-test.tsv')
-    cnn_model = QaCNN(
+    lstm_model = QaLSTM(
         q_length=data_helper.max_q_length,
         a_length=data_helper.max_a_length,
         word_embeddings=data_helper.embeddings,
-        filter_sizes=[1, 2, 3, 5, 7, 9],
-        num_filters=128,
+        LSTM_hidden_size = 300,
         margin=0.25,
         l2_reg_lambda=0
     )
@@ -43,7 +42,7 @@ def train_cnn():
     global_step = tf.Variable(0, name='global_step', trainable=False)
 
     optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-    train_op = optimizer.minimize(cnn_model.loss, global_step=global_step)
+    train_op = optimizer.minimize(lstm_model.loss, global_step=global_step)
 
     checkpoint_dir = os.path.abspath('data/model/checkpoints')
     checkpoint_model_path = os.path.join(checkpoint_dir, 'model.ckpt')
@@ -52,28 +51,31 @@ def train_cnn():
     saver = tf.train.Saver()
 
     with tf.Session() as sess:
-        summary_writer = tf.train.SummaryWriter('data/model/summary', sess.graph)
+        summary_writer = tf.summary.FileWriter ('data/model/summary', sess.graph)
         sess.run(tf.global_variables_initializer())
         for epoch in range(3):
             train_loss = 0
             for batch in data_helper.gen_train_batches(batch_size=15):
-                q_batch, pos_a_batch, neg_a_batch = zip(*batch)
-                _, loss, summaries = sess.run([train_op, cnn_model.loss, cnn_model.summary_op],
-                                              feed_dict={cnn_model.question: q_batch,
-                                                          cnn_model.pos_answer: pos_a_batch,
-                                                          cnn_model.neg_answer: neg_a_batch,
-                                                          })
+                q_batch, pos_a_batch, neg_a_batch, q_length_batch, pa_length_batch, na_length_batch = zip(*batch)
+                _, loss, summaries = sess.run([train_op, lstm_model.loss, lstm_model.summary_op],
+                                              feed_dict={lstm_model.question: q_batch,
+                                                         lstm_model.pos_answer: pos_a_batch,
+                                                         lstm_model.neg_answer: neg_a_batch,
+                                                         lstm_model.question_length : q_length_batch,
+                                                         lstm_model.pos_answer_length : pa_length_batch,
+                                                         lstm_model.neg_answer_length : na_length_batch
+                                              })
                 train_loss += loss
                 cur_step = tf.train.global_step(sess, global_step)
                 summary_writer.add_summary(summaries, cur_step)
                 if cur_step % 10 == 0:
                     # print('Loss: {}'.format(train_loss))
                     # test on dev set
-                    q_dev, ans_dev = zip(*data_helper.dev_data)
-                    similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_dev,
-                                                                                      cnn_model.pos_answer: ans_dev,
-                                                                                      cnn_model.neg_answer: ans_dev,
-                                                                                      })
+                    q_dev, ans_dev, ans_length = zip(*data_helper.dev_data)
+                    similarity_scores = sess.run(lstm_model.pos_similarity, feed_dict={lstm_model.question: q_dev,
+                                                                                       lstm_model.pos_answer: ans_dev,
+                                                                                       lstm_model.pos_answer_length: ans_length,
+                })
                     for sample, similarity_score in zip(data_helper.dev_samples, similarity_scores):
                         sample.score = similarity_score
                     with open('data/output/WikiQA-dev.rank'.format(epoch), 'w') as fout:
@@ -91,12 +93,11 @@ def gen_rank_for_test(checkpoint_model_path):
     data_helper = DataHelper()
     data_helper.restore('data/model/data_helper_info.bin')
     data_helper.prepare_test_data('data/lemmatized/WikiQA-test.tsv')
-    cnn_model = QaCNN(
+    lstm_model = QaLSTM(
         q_length=data_helper.max_q_length,
         a_length=data_helper.max_a_length,
         word_embeddings=data_helper.embeddings,
-        filter_sizes=[1, 2, 3, 5, 7, 9],
-        num_filters=128,
+        LSTM_hidden_size=300,
         margin=0.25,
         l2_reg_lambda=0
     )
@@ -104,11 +105,11 @@ def gen_rank_for_test(checkpoint_model_path):
     with tf.Session() as sess:
         saver.restore(sess, checkpoint_model_path)
         # test on test set
-        q_test, ans_test = zip(*data_helper.test_data)
-        similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_test,
-                                                                          cnn_model.pos_answer: ans_test,
-                                                                          cnn_model.neg_answer: ans_test,
-                                                                          })
+        q_test, ans_test, ans_length = zip(*data_helper.test_data)
+        similarity_scores = sess.run(lstm_model.pos_similarity, feed_dict={lstm_model.question: q_test,
+                                                                           lstm_model.pos_answer: ans_test,
+                                                                           lstm_model.pos_answer_length: ans_length,
+        })
         for sample, similarity_score in zip(data_helper.test_samples, similarity_scores):
             # print('{}\t{}\t{}'.format(sample.q_id, sample.a_id, similarity_score))
             sample.score = similarity_score
@@ -132,7 +133,7 @@ if __name__ == '__main__':
     if args.prepare:
         prepare_helper()
     if args.train:
-        train_cnn()
+        train_lstm()
     if args.test:
         checkpoint_num = 2
         gen_rank_for_test(checkpoint_model_path='data/model/checkpoints/model.ckpt-{}'.format(checkpoint_num))

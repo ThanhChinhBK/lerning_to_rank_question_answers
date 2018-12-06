@@ -6,7 +6,67 @@ import pickle
 import numpy as np
 from tensorflow.contrib import learn as tf_learn
 
+def text_to_wordlist(text, remove_stopwords=False, stem_words=False):
+  # Convert words to lower case and split them
+  text = text.lower().split()
+  
+  # Optionally, remove stop words
+  if remove_stopwords:
+    stops = set(stopwords.words("english"))
+    text = [w for w in text if not w in stops]
+    
+  text = " ".join(text)
 
+  
+  # remove html tags
+  text = re.sub(r'\[\S+[|\]]([\S ]+){0,1}', '', text)
+
+  #remove emoticons
+  emoticons = re.findall('(?::|;|=)(?:-)?(?:\)|\(|D|P|S)',
+                         text.lower())
+  text = re.sub('[\W]+', ' ', text.lower()) \
+         + ' '.join(emoticons).replace('-', '')
+
+  # Clean the text
+  text = re.sub(r"[^A-Za-z0-9^,!.\/'+-=?]", " ", text)
+  text = re.sub(r"what's", "what is ", text)
+  text = re.sub(r"\'s", " ", text)
+  text = re.sub(r"\'ve", " have ", text)
+  text = re.sub(r"can't", "cannot ", text)
+  text = re.sub(r"n't", " not ", text)
+  text = re.sub(r"i'm", "i am ", text)
+  text = re.sub(r"\'re", " are ", text)
+  text = re.sub(r"\'d", " would ", text)
+  text = re.sub(r"\'ll", " will ", text)
+  text = re.sub(r",", ".", text)
+  text = re.sub(r"\.", " ", text)
+  text = re.sub(r"!", " ! ", text)
+  text = re.sub(r"\/", " ", text)
+  text = re.sub(r"\^", " ^ ", text)
+  text = re.sub(r"\+", " + ", text)
+  text = re.sub(r"\-", " - ", text)
+  text = re.sub(r"\=", " = ", text)
+  text = re.sub(r"'", " ", text)
+  text = re.sub(r"(\d+)(k)", r"\g<1>000", text)
+  text = re.sub(r":", " : ", text)
+  text = re.sub(r" e g ", " eg ", text)
+  text = re.sub(r" b g ", " bg ", text)
+  text = re.sub(r" u s ", " american ", text)
+  text = re.sub(r"\0s", "0", text)
+  text = re.sub(r" 9 11 ", "911", text)
+  text = re.sub(r"e - mail", "email", text)
+  text = re.sub(r"j k", "jk", text)
+  text = re.sub(r"\s{2,}", " ", text)
+  
+  # Optionally, shorten words to their stems
+  if stem_words:
+    text = text.split()
+    stemmer = SnowballStemmer('english')
+    stemmed_words = [stemmer.stem(word) for word in text]
+    text = " ".join(stemmed_words)
+    
+  # Return a list of words
+  return(text)
 class QaSample(object):
     def __init__(self, q_id, question, a_id, answer, label=None, score=0):
         self.q_id = q_id
@@ -25,6 +85,8 @@ def load_qa_data(fname):
             except ValueError:
                 q_id, question, a_id, answer = line.strip().split('\t')
                 label = 0
+            question = text_to_wordlist(question)
+            answer = text_to_wordlist(answer)
             yield QaSample(q_id, question, a_id, answer, label)
 
 
@@ -142,7 +204,11 @@ class DataHelper(object):
                 question_ids = list(self.vocab_processor.transform([question]))[0][:self.max_q_length]
                 pos_ans_ids = list(self.vocab_processor.transform([pos_ans]))[0][:self.max_a_length]
                 neg_ans_ids = list(self.vocab_processor.transform([neg_ans]))[0][:self.max_a_length]
-                self.train_triplets.append((question_ids, pos_ans_ids, neg_ans_ids))
+                question_length = len([a for a in question_ids if a!=0])
+                pos_ans_length = len([a for a in pos_ans_ids if a!=0])
+                neg_ans_length = len([a for a in neg_ans_ids if a!= 0])
+                self.train_triplets.append((question_ids, pos_ans_ids, neg_ans_ids,
+                                            question_length, pos_ans_length, neg_ans_length))
 
     def prepare_dev_data(self, dev_file):
         self.dev_samples = list(load_qa_data(dev_file))
@@ -150,7 +216,9 @@ class DataHelper(object):
         for sample in self.dev_samples:
             question_ids = list(self.vocab_processor.transform([sample.question]))[0][:self.max_q_length]
             answer_ids = list(self.vocab_processor.transform([sample.answer]))[0][:self.max_a_length]
-            self.dev_data.append((question_ids, answer_ids))
+            question_length = len([a for a in question_ids if a!=0])
+            answer_length = len([a for a in answer_ids if a!=0])
+            self.dev_data.append((question_ids, answer_ids, question_length, answer_length))
 
     def prepare_test_data(self, test_file):
         self.test_samples = list(load_qa_data(test_file))
@@ -158,4 +226,6 @@ class DataHelper(object):
         for sample in self.test_samples:
             question_ids = list(self.vocab_processor.transform([sample.question]))[0][:self.max_q_length]
             answer_ids = list(self.vocab_processor.transform([sample.answer]))[0][:self.max_a_length]
-            self.test_data.append((question_ids, answer_ids))
+            question_length = len([a for a in question_ids if a!=0])
+            answer_length = len([a for a in answer_ids if a!=0])
+            self.test_data.append((question_ids, answer_ids, question_length, answer_length))
