@@ -11,7 +11,7 @@ from data_helper import DataHelper
 from data_helper import get_final_rank
 from eval import eval_map_mrr
 
-embedding_file = 'data/embeddings/glove.6B.300d.txt'
+embedding_file = '../Question-Retrieval/glove.6B.300d.txt'
 train_file = 'data/lemmatized/WikiQA-train.tsv'
 dev_file = 'data/lemmatized/WikiQA-dev.tsv'
 test_file = 'data/lemmatized/WikiQA-test.tsv'
@@ -53,7 +53,7 @@ def train_lstm():
     with tf.Session() as sess:
         summary_writer = tf.summary.FileWriter ('data/model/summary', sess.graph)
         sess.run(tf.global_variables_initializer())
-        for epoch in range(3):
+        for epoch in range(10):
             train_loss = 0
             for batch in data_helper.gen_train_batches(batch_size=15):
                 q_batch, pos_a_batch, neg_a_batch, q_length_batch, pa_length_batch, na_length_batch = zip(*batch)
@@ -71,9 +71,10 @@ def train_lstm():
                 if cur_step % 10 == 0:
                     # print('Loss: {}'.format(train_loss))
                     # test on dev set
-                    q_dev, ans_dev, ans_length = zip(*data_helper.dev_data)
+                    q_dev, ans_dev, q_length, ans_length = zip(*data_helper.dev_data)
                     similarity_scores = sess.run(lstm_model.pos_similarity, feed_dict={lstm_model.question: q_dev,
                                                                                        lstm_model.pos_answer: ans_dev,
+                                                                                       lstm_model.question_length: q_length,
                                                                                        lstm_model.pos_answer_length: ans_length,
                 })
                     for sample, similarity_score in zip(data_helper.dev_samples, similarity_scores):
@@ -105,9 +106,10 @@ def gen_rank_for_test(checkpoint_model_path):
     with tf.Session() as sess:
         saver.restore(sess, checkpoint_model_path)
         # test on test set
-        q_test, ans_test, ans_length = zip(*data_helper.test_data)
+        q_test, ans_test, q_length, ans_length = zip(*data_helper.test_data)
         similarity_scores = sess.run(lstm_model.pos_similarity, feed_dict={lstm_model.question: q_test,
                                                                            lstm_model.pos_answer: ans_test,
+                                                                           lstm_model.question_length : q_length,
                                                                            lstm_model.pos_answer_length: ans_length,
         })
         for sample, similarity_score in zip(data_helper.test_samples, similarity_scores):
@@ -135,5 +137,5 @@ if __name__ == '__main__':
     if args.train:
         train_lstm()
     if args.test:
-        checkpoint_num = 2
+        checkpoint_num = 9
         gen_rank_for_test(checkpoint_model_path='data/model/checkpoints/model.ckpt-{}'.format(checkpoint_num))

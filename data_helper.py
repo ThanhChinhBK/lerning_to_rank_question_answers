@@ -85,8 +85,8 @@ def load_qa_data(fname):
             except ValueError:
                 q_id, question, a_id, answer = line.strip().split('\t')
                 label = 0
-            question = text_to_wordlist(question)
-            answer = text_to_wordlist(answer)
+            #question = text_to_wordlist(question)
+            #answer = text_to_wordlist(answer)
             yield QaSample(q_id, question, a_id, answer, label)
 
 

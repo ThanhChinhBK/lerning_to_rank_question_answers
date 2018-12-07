@@ -6,16 +6,16 @@ import tensorflow as tf
 
 
 class QaLSTM(object):
-    def _LSTM_encode(self, embdded, length, scope_name, reuse=False, initial_state=None):
-        with tf.variable_scope(scope):
+    def _LSTM_encode(self, embedded, length, scope_name, reuse=False, initial_state=None):
+        with tf.variable_scope(scope_name) as scope:
             if reuse:
                 scope.reuse_variables()
-            state, (c, final_state) = tf.nn.dynamic_rnn(cell=lstm_cell,
+            state, (c, final_state) = tf.nn.dynamic_rnn(cell=self.lstm_cell,
                                                          inputs = embedded,
                                                          sequence_length=length,
                                                          initial_state=initial_state,
                                                          dtype=tf.float32)
-            return state, c, final_state 
+            return state, (c, final_state )
         
     def __init__(self, q_length, a_length, word_embeddings, LSTM_hidden_size, margin, l2_reg_lambda):
 
@@ -29,7 +29,7 @@ class QaLSTM(object):
         l2_reg_loss = tf.constant(0.0)
 
         vocab_size, embedding_size = word_embeddings.shape
-        num_filters_total = num_filters * len(filter_sizes)
+        # num_filters_total = num_filters * len(filter_sizes)
 
         with tf.device('/cpu:0'), tf.name_scope('embedding'):
             self.embeddings = tf.get_variable("embeddings",
@@ -43,7 +43,7 @@ class QaLSTM(object):
             # self.embedded_pos_a_expanded = tf.expand_dims(self.embedded_pos_a, -1)
             # self.embedded_neg_a_expanded = tf.expand_dims(self.embedded_neg_a, -1)
         with tf.variable_scope("LSTM_encoder"):
-            cell = tf.contrib.rnn.LSTMCell(LSTM_hidden_size)
+            self.lstm_cell = tf.contrib.rnn.LSTMCell(LSTM_hidden_size)
             q_output, (q_c, q_state) = self._LSTM_encode(self.embedded_q, self.question_length, "LSTM")
             pa_output, (pa_c, pa_state) = self._LSTM_encode(self.embedded_pos_a, self.pos_answer_length, "LSTM", True)
             na_output, (na_c, na_state) = self._LSTM_encode(self.embedded_neg_a, self.neg_answer_length, "LSTM", True)
@@ -51,9 +51,12 @@ class QaLSTM(object):
             M = tf.get_variable(name="M",
                                 shape=[LSTM_hidden_size, LSTM_hidden_size],
                                 initializer=tf.truncated_normal_initializer())
-            generated_response = tf.tensordot(q_state, M, 1)
-            self.pos_similarity = tf.tensordot(generated_response, pa_state, 1)
-            self.neg_similarity = tf.tensordot(generated_response, na_state, 1)
+            generated_response = tf.matmul(q_state, M)
+            generated_response = tf.expand_dims(generated_response, 2)
+            pa_state_expanded = tf.expand_dims(pa_state, 2)
+            self.pos_similarity = tf.matmul(generated_response, pa_state_expanded, True)
+            na_state_expanded = tf.expand_dims(na_state, 2)
+            self.neg_similarity = tf.matmul(generated_response, na_state_expanded, True)
         # conv-pool-drop for question
         # pooled_q_outputs = []
         # for filter_size in filter_sizes:
